@@ -1,4 +1,4 @@
-const CACHE = 'lot-journal-v1';
+const CACHE = 'lot-journal-v6';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function(e){
