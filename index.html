@@ -296,12 +296,6 @@
     var t=document.createElement('div'); t.className='toast'; t.textContent=msg;
     document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2200);
   }
-  function instrumentFactor(name){
-    var f = state.instruments.find(function(i){ return i.name===name; });
-    return f ? f.factor : 1;
-  }
-  function computeSlFromRaw(raw, factor){ var r=parseFloat(raw)||0; return factor>0 ? r/factor : 0; }
-
   function computeFromRisk(capital, riskPct, sl){
     var riskAmt = capital*(riskPct/100); var qty = 0;
     if(sl>0){ var total = riskAmt/sl; qty = Math.round((total/100)*100)/100; }
@@ -606,17 +600,13 @@
 
     html += '<div class="manage-block"><h4>Instruments — tick the ones you want in the dropdown</h4>';
     state.instruments.forEach(function(ins,idx){
-      html += '<div class="manage-row"><label><input type="checkbox" data-taginstr="'+idx+'" '+(ins.enabled?'checked':'')+'><span>'+ins.name+' <span class="mini">SL Value per $1: '+ins.factor+'</span></span></label><button class="delbtn" data-rminstr="'+idx+'">×</button></div>';
+      html += '<div class="manage-row"><label><input type="checkbox" data-taginstr="'+idx+'" '+(ins.enabled?'checked':'')+'><span>'+ins.name+' <span class="mini">Factor: '+ins.factor+'</span></span></label><button class="delbtn" data-rminstr="'+idx+'">×</button></div>';
     });
-    html += '<div class="field"><label>Instrument</label><input type="text" id="newInstrName" placeholder="e.g. NAS100"></div>';
-    html += '<div class="field"><label>SL Value per $1</label><input type="text" inputmode="decimal" id="newInstrFactor" placeholder="e.g. 0.001"></div>';
-    html += '<div class="hint2" style="margin-bottom:8px">This is the same "SL Value per $1" lookup from your original sheet — e.g. XAUUSD = 1, GBPUSD = 0.001, BTC = 100.</div>';
+    html += '<div class="row2" style="margin-bottom:14px">';
+    html += '<div class="field" style="margin-bottom:0"><label>Instrument</label><input type="text" id="newInstrName" placeholder="e.g. NAS100"></div>';
+    html += '<div class="field" style="margin-bottom:0"><label>Factor</label><input type="text" inputmode="decimal" id="newInstrFactor" placeholder="e.g. 0.001"></div>';
+    html += '</div>';
     html += '<button class="soft" id="btnAddInstrument">＋ Add instrument</button>';
-    html += '<div class="hint2" style="margin:14px 0 8px">Quick check — see what a raw stop distance equals in SL value, for any instrument</div>';
-    html += '<div class="row2"><select id="qcInstr">';
-    state.instruments.forEach(function(ins){ html += '<option value="'+ins.name+'">'+ins.name+' (factor '+ins.factor+')</option>'; });
-    html += '</select><input type="text" inputmode="decimal" id="qcRaw" placeholder="Raw distance e.g. 5.8"></div>';
-    html += '<div class="calc-box" style="margin-top:8px"><div><div class="cb-label">SL value</div><div class="cb-val" id="qcResult">'+computeSlFromRaw('', instrumentFactor(state.instruments[0]?state.instruments[0].name:'')).toFixed(4)+'</div></div></div>';
     html += '</div>';
 
     html += '<div class="manage-block"><h4>Patterns — tick the ones you want in the dropdown</h4>';
@@ -677,18 +667,11 @@
     });
 
     var btnAddInstrument = document.getElementById('btnAddInstrument');
-    var qcInstr = document.getElementById('qcInstr'), qcRaw = document.getElementById('qcRaw');
-    function updateQc(){
-      var res = document.getElementById('qcResult');
-      if(res && qcInstr) res.textContent = computeSlFromRaw((qcRaw?qcRaw.value:''), instrumentFactor(qcInstr.value)).toFixed(4);
-    }
-    if(qcInstr) qcInstr.onchange = updateQc;
-    if(qcRaw) qcRaw.oninput = updateQc;
     if(btnAddInstrument) btnAddInstrument.onclick = function(){
       var name = (document.getElementById('newInstrName').value||'').trim().toUpperCase();
       var factor = parseFloat(document.getElementById('newInstrFactor').value);
       if(!name){ toast('Enter an instrument name'); return; }
-      if(!factor || factor<=0){ toast('Enter a valid SL value per $1'); return; }
+      if(!factor || factor<=0){ toast('Enter a valid factor'); return; }
       if(state.instruments.some(function(i){ return i.name===name; })){ toast('Already exists'); return; }
       state.instruments.push({name:name, factor:factor, enabled:true}); save(); render(); toast('Instrument added');
     };
@@ -732,6 +715,22 @@
     if(fEntryPrice) fEntryPrice.oninput = function(){ ui.entryPrice = fEntryPrice.value; };
     var fJournalText = document.getElementById('fJournalText');
     if(fJournalText) fJournalText.oninput = function(){ ui.journalText = fJournalText.value; };
+    if(fJournalText) fJournalText.onpaste = function(e){
+      var cd = e.clipboardData || window.clipboardData;
+      if(!cd || !cd.items) return;
+      var imgFiles = [];
+      for(var i=0;i<cd.items.length;i++){
+        var it = cd.items[i];
+        if(it.kind==='file' && it.type && it.type.indexOf('image/')===0){
+          var f = it.getAsFile();
+          if(f) imgFiles.push(f);
+        }
+      }
+      if(imgFiles.length){
+        e.preventDefault();
+        handleImageFiles(imgFiles, function(src){ ui.journalImages.push(src); render(); });
+      }
+    };
 
     var fInstr = document.getElementById('fInstr');
     if(fInstr) fInstr.onchange = function(){ ui.instrument = fInstr.value; render(); };
