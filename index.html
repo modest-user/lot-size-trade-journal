@@ -102,6 +102,13 @@
   button.ghost{ width:100%; background:none; color:var(--ink-dim); border:1px solid var(--line-strong); font-size:13.5px; font-weight:500; padding:11px; border-radius:var(--radius-sm); cursor:pointer; font-family:'IBM Plex Sans',sans-serif; margin-top:8px; }
   button.soft{ width:100%; background:var(--surface-2); color:var(--ink); border:1px solid var(--line-strong); font-size:12.5px; font-weight:600; padding:9px 12px; border-radius:8px; cursor:pointer; font-family:'IBM Plex Sans',sans-serif; }
 
+  .journal-input-row{ display:flex; gap:8px; align-items:flex-start; }
+  .journal-input-row textarea{ flex:1; }
+  .mic-btn{ flex-shrink:0; width:40px; height:40px; border-radius:50%; background:var(--surface-2); border:1px solid var(--line-strong); color:var(--ink-dim); font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
+  .mic-btn.listening{ background:var(--loss); color:#fff; border-color:var(--loss); animation:pulseMic 1s infinite; }
+  .mic-btn:disabled{ opacity:0.4; cursor:not-allowed; }
+  @keyframes pulseMic{ 0%,100%{opacity:1;} 50%{opacity:0.55;} }
+
   .open-summary{ display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-bottom:16px; }
   .open-summary div{font-size:12px; color:var(--ink-dim);}
   .open-summary div b{display:block; color:var(--ink); font-family:'IBM Plex Mono',monospace; font-size:14.5px; font-weight:600; margin-top:2px;}
@@ -171,6 +178,11 @@
   var TIMEFRAMES = ['1m','5m','15m','30m','1h','2h','4h','1D','1W'];
   var TF_LINK = {'1m':'1m','5m':'1m','15m':'5m','30m':'5m','1h':'15m','2h':'30m','4h':'1h','1D':'4h','1W':'1D'};
   var RESULTS = ['Target Hit','SL Hit','Trailing SL Hit','Trade Cut','Breakeven'];
+  var VOICE_LANGS = [
+    {v:'en-IN', l:'Hinglish / English (Roman script)'},
+    {v:'hi-IN', l:'Hindi (Devanagari script)'},
+    {v:'en-US', l:'English (US)'}
+  ];
 
   var state = load();
   var ui = freshUi();
@@ -193,7 +205,8 @@
       riskPct:'2', qty:'0.01', slValue:'', entryPrice:'',
       analysisTf:'30m', tradeTf:'5m', time:'', timeManuallySet:false, pattern:p0,
       journalText:'', journalImages:[], journalOpen:false,
-      result:'Target Hit', cutSign:'profit', exitPrice:'', plRaw:'', withdrawalRaw:'',
+      result:'Target Hit', cutSign:'profit', plRaw:'', withdrawalRaw:'',
+      exitJournalText:'', exitJournalImages:[],
       showSettings:false, lightboxSrc:null };
   }
 
@@ -217,6 +230,7 @@
         return {name:p.name, enabled: (typeof p.enabled==='boolean') ? p.enabled : true};
       });
     }
+    if(!s.voiceLang) s.voiceLang = 'en-IN';
     if(!s.trades) s.trades = [];
     s.trades.forEach(function(t){ if(!t.id) t.id = 't_'+Math.random().toString(36).slice(2)+Date.now(); });
     return s;
@@ -458,6 +472,12 @@
             t.journalImages.forEach(function(src){ html += '<div class="img-thumb"><img src="'+src+'" data-view="'+src+'"></div>'; });
             html += '</div></div>';
           }
+          if(t.exitJournalText){ html += '<div class="full"><p>'+escapeHtml(t.exitJournalText)+'</p></div>'; }
+          if(t.exitJournalImages && t.exitJournalImages.length){
+            html += '<div class="full"><div class="img-grid">';
+            t.exitJournalImages.forEach(function(src){ html += '<div class="img-thumb"><img src="'+src+'" data-view="'+src+'"></div>'; });
+            html += '</div></div>';
+          }
           html += '<div class="full"><button class="trow-del" data-del="'+t.id+'">Delete this entry</button></div>';
           html += '</div>';
         }
@@ -531,7 +551,10 @@
     html += '</select></div>';
     html += '</div>';
     html += '<div class="field"><label>Your take on this trade</label>'+
-      '<textarea id="fJournalText" placeholder="Setup, reasoning, chart context, how you felt taking it...">'+escapeHtml(ui.journalText||'')+'</textarea></div>';
+      '<div class="journal-input-row">'+
+      '<textarea id="fJournalText" spellcheck="true" placeholder="Setup, reasoning, chart context, how you felt taking it...">'+escapeHtml(ui.journalText||'')+'</textarea>'+
+      '<button type="button" class="mic-btn" id="btnMicEntry" title="Voice input">🎤</button>'+
+      '</div></div>';
     html += '<div class="field"><input type="file" accept="image/*" multiple id="fImageInput" style="display:none">'+
       '<button type="button" class="soft" id="btnAddPhoto">＋ Add photo(s)</button>';
     if(ui.journalImages && ui.journalImages.length){
@@ -560,8 +583,6 @@
     if(t.entryPrice){ html += '<div>Entry price<b>'+t.entryPrice+'</b></div>'; }
     html += '</div>';
 
-    html += '<div class="field"><label>Exit Price</label><input type="text" inputmode="decimal" id="cExitPrice" value="'+(ui.exitPrice||'')+'" placeholder="e.g. 2421.10"></div>';
-
     html += '<div class="field"><label>Result</label><select id="cResult">';
     RESULTS.forEach(function(r){ html += '<option value="'+r+'" '+(ui.result===r?'selected':'')+'>'+r+'</option>'; });
     html += '</select></div>';
@@ -584,6 +605,20 @@
     var signed = computeSignedPl(ui.result, ui.plRaw, ui.cutSign);
     var wdNow = parseFloat(ui.withdrawalRaw)||0;
     html += '<div class="calc-box"><div><div class="cb-label">New capital will be</div><div class="cb-val" id="cNewCap">'+money(t.capitalBefore+signed-wdNow)+'</div></div></div>';
+
+    html += '<div class="field"><label>Your take on this trade (exit notes)</label>'+
+      '<div class="journal-input-row">'+
+      '<textarea id="cJournalText" spellcheck="true" placeholder="How it played out, lessons learned, exit reasoning...">'+escapeHtml(ui.exitJournalText||'')+'</textarea>'+
+      '<button type="button" class="mic-btn" id="btnMicExit" title="Voice input">🎤</button>'+
+      '</div></div>';
+    html += '<div class="field"><input type="file" accept="image/*" multiple id="cImageInput" style="display:none">'+
+      '<button type="button" class="soft" id="btnAddClosePhoto">＋ Add photo(s)</button>';
+    if(ui.exitJournalImages && ui.exitJournalImages.length){
+      html += '<div class="img-grid">';
+      ui.exitJournalImages.forEach(function(src,idx){ html += '<div class="img-thumb"><img src="'+src+'" data-view="'+src+'"><button data-rmimgexit="'+idx+'">×</button></div>'; });
+      html += '</div>';
+    }
+    html += '</div>';
 
     html += '<button class="primary" id="btnCloseTrade">Close trade</button>';
     html += '<button class="ghost" id="btnCancelOpen">Cancel this entry (undo)</button>';
@@ -616,6 +651,13 @@
     html += '<input type="text" id="newPatternName" placeholder="e.g. Double Top" style="margin:10px 0 8px">';
     html += '<button class="soft" id="btnAddPattern">＋ Add pattern</button></div>';
 
+    html += '<div class="manage-block"><h4>Voice input language</h4>';
+    html += '<div class="field" style="margin-bottom:8px"><select id="setVoiceLang">';
+    VOICE_LANGS.forEach(function(o){ html += '<option value="'+o.v+'" '+((state.voiceLang||'en-IN')===o.v?'selected':'')+'>'+o.l+'</option>'; });
+    html += '</select></div>';
+    html += '<div class="hint">Sets what the mic button (🎤) on journal notes listens for. "Hinglish / English" types Hindi words out in English letters as you speak it; "Hindi (Devanagari)" writes in the Hindi script. Needs Chrome and an internet connection; accuracy depends on your device.</div>';
+    html += '</div>';
+
     html += '<div class="settings-list">';
     html += '<button class="ghost" id="btnExport">Export backup (JSON)</button>';
     html += '<button class="ghost" id="btnReset" style="border-color:var(--loss); color:var(--loss)">Reset all data</button>';
@@ -646,6 +688,8 @@
       a.download = 'lot-size-journal-backup-'+todayISO()+'.json';
       document.body.appendChild(a); a.click(); a.remove();
     };
+    var svl = document.getElementById('setVoiceLang');
+    if(svl) svl.onchange = function(){ state.voiceLang = svl.value; save(); toast('Voice language updated'); };
     var bsc = document.getElementById('btnSaveCurrency');
     if(bsc) bsc.onclick = function(){
       var v = document.getElementById('setCurrency').value.trim() || '$';
@@ -790,8 +834,47 @@
       save(); render(); toast('Entry locked in. Trade it, then come back to close.');
     };
 
-    var cExitPrice = document.getElementById('cExitPrice');
-    if(cExitPrice) cExitPrice.oninput = function(){ ui.exitPrice = cExitPrice.value; };
+    var cJournalText = document.getElementById('cJournalText');
+    if(cJournalText) cJournalText.oninput = function(){ ui.exitJournalText = cJournalText.value; };
+    if(cJournalText) cJournalText.onpaste = function(e){
+      var cd = e.clipboardData || window.clipboardData;
+      if(!cd || !cd.items) return;
+      var imgFiles = [];
+      for(var i=0;i<cd.items.length;i++){
+        var it = cd.items[i];
+        if(it.kind==='file' && it.type && it.type.indexOf('image/')===0){
+          var f = it.getAsFile();
+          if(f) imgFiles.push(f);
+        }
+      }
+      if(imgFiles.length){
+        e.preventDefault();
+        handleImageFiles(imgFiles, function(src){ ui.exitJournalImages.push(src); render(); });
+      }
+    };
+    var btnAddClosePhoto = document.getElementById('btnAddClosePhoto');
+    var cImageInput = document.getElementById('cImageInput');
+    if(btnAddClosePhoto && cImageInput){
+      btnAddClosePhoto.onclick = function(){ cImageInput.click(); };
+      cImageInput.onchange = function(){ handleImageFiles(cImageInput.files, function(src){ ui.exitJournalImages.push(src); render(); }); };
+    }
+    document.querySelectorAll('[data-rmimgexit]').forEach(function(btn){
+      btn.onclick = function(e){ e.stopPropagation(); var idx = parseInt(btn.getAttribute('data-rmimgexit'),10); ui.exitJournalImages.splice(idx,1); render(); };
+    });
+
+    setupVoiceButton('btnMicEntry', function(text){
+      var cur = ui.journalText||'';
+      ui.journalText = (cur ? cur+' ' : '') + text;
+      var el = document.getElementById('fJournalText');
+      if(el) el.value = ui.journalText;
+    });
+    setupVoiceButton('btnMicExit', function(text){
+      var cur = ui.exitJournalText||'';
+      ui.exitJournalText = (cur ? cur+' ' : '') + text;
+      var el = document.getElementById('cJournalText');
+      if(el) el.value = ui.exitJournalText;
+    });
+
     var cResult = document.getElementById('cResult');
     if(cResult) cResult.onchange = function(){ ui.result = cResult.value; render(); };
     var fCutSign = document.getElementById('fCutSign');
@@ -818,7 +901,8 @@
       var wd = parseFloat(ui.withdrawalRaw)||0;
       var t = state.openTrade;
       t.id = 't_'+Math.random().toString(36).slice(2)+Date.now();
-      t.result = ui.result; t.pl = signed; t.withdrawal = wd; t.exitPrice = ui.exitPrice||'';
+      t.result = ui.result; t.pl = signed; t.withdrawal = wd;
+      t.exitJournalText = ui.exitJournalText||''; t.exitJournalImages = (ui.exitJournalImages||[]).slice();
       t.capitalAfter = t.capitalBefore + signed - wd; t._open = false;
       state.trades.unshift(t); state.openTrade = null;
       ui = freshUi();
@@ -960,6 +1044,29 @@
     a.href = URL.createObjectURL(blob);
     a.download = 'lot-journal-'+label.replace(/\s+/g,'-').toLowerCase()+'-'+todayISO()+'.doc';
     document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function setupVoiceButton(btnId, applyTranscript){
+    var btn = document.getElementById(btnId);
+    if(!btn) return;
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){ btn.disabled = true; btn.title = 'Voice input needs Chrome (Android/desktop)'; return; }
+    btn.onclick = function(){
+      if(btn._rec){ btn._rec.stop(); return; }
+      var rec = new SR();
+      rec.lang = state.voiceLang || 'en-IN';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      rec.onstart = function(){ btn.classList.add('listening'); btn.textContent = '●'; };
+      rec.onresult = function(e){
+        var t = e.results[0][0].transcript;
+        if(t) applyTranscript(t);
+      };
+      rec.onerror = function(){ toast('Voice input error — try again'); };
+      rec.onend = function(){ btn.classList.remove('listening'); btn.textContent = '🎤'; btn._rec = null; };
+      btn._rec = rec;
+      try{ rec.start(); }catch(e){ btn._rec = null; }
+    };
   }
 
   function handleImageFiles(fileList, onEach){
